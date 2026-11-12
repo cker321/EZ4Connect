@@ -21,13 +21,17 @@ Copy-Item -Path "../$BuildDir/Release/$TargetName.exe" -Destination .
 # Run windeployqt
 & windeployqt.exe "$TargetName.exe"
 
-# Download and extract zju-connect
+# Download and extract zju-connect（旧版内核，来自 cker321/zju-connect）
 $ZjuReleasePath = if ($Nightly -eq "true") { "download/nightly" } else { "latest/download" }
-$ZjuUrl = "https://github.com/Mythologyli/zju-connect/releases/$ZjuReleasePath/zju-connect-windows-$Architecture.zip"
+$ZjuUrl = "https://github.com/cker321/zju-connect/releases/$ZjuReleasePath/zju-connect-windows-$Architecture.zip"
 $ZjuZipPath = "zju-connect-windows-$Architecture.zip"
 Invoke-WebRequest -Uri $ZjuUrl -OutFile $ZjuZipPath
 Expand-Archive -Path $ZjuZipPath -DestinationPath . -Force
 Remove-Item -Path $ZjuZipPath
+# 重命名为固定名 zju-connect-legacy.exe
+if (Test-Path -Path "zju-connect.exe") {
+    Rename-Item -Path "zju-connect.exe" -NewName "zju-connect-legacy.exe"
+}
 
 # Copy additional files
 Copy-Item -Path "../libs/wintun/bin/$Architecture/wintun.dll" -Destination .

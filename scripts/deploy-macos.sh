@@ -13,7 +13,7 @@ APP_PATH="$TARGET_NAME.app"
 # Copy app bundle
 cp -R "$BUILD_DIR/$TARGET_NAME.app" .
 
-# Download and extract zju-connect
+# Download and extract zju-connect（旧版内核，来自 cker321/zju-connect）
 ZJU_ARCH="${ARCH}"
 if [ "$ARCH" = "x86_64" ]; then
     ZJU_ARCH="amd64"
@@ -24,12 +24,13 @@ if [ "$NIGHTLY" = "true" ]; then
     ZJU_RELEASE_PATH="download/nightly"
 fi
 
-curl -LO "https://github.com/Mythologyli/zju-connect/releases/$ZJU_RELEASE_PATH/zju-connect-darwin-$ZJU_ARCH.zip"
+# 本项目锁定使用旧版内核（cker321/zju-connect），而非上游新版
+curl -LO "https://github.com/cker321/zju-connect/releases/$ZJU_RELEASE_PATH/zju-connect-darwin-$ZJU_ARCH.zip"
 unzip -o "zju-connect-darwin-$ZJU_ARCH.zip"
 rm "zju-connect-darwin-$ZJU_ARCH.zip"
 
-# Copy zju-connect into app bundle
-cp zju-connect "$APP_PATH/Contents/MacOS/"
+# Copy zju-connect into app bundle，并重命名为固定名 zju-connect-legacy
+cp zju-connect "$APP_PATH/Contents/MacOS/zju-connect-legacy"
 
 # Run macdeployqt
 macdeployqt "$APP_PATH"

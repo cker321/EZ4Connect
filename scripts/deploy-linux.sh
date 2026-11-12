@@ -54,9 +54,11 @@ if [ "$NIGHTLY" = "true" ]; then
     ZJU_RELEASE_PATH="download/nightly"
 fi
 
-wget -O "zju-connect-linux-$ZJU_ARCH.zip" "https://github.com/Mythologyli/zju-connect/releases/$ZJU_RELEASE_PATH/zju-connect-linux-$ZJU_ARCH.zip"
+# 本项目锁定使用旧版内核（cker321/zju-connect），而非上游新版
+wget -O "zju-connect-linux-$ZJU_ARCH.zip" "https://github.com/cker321/zju-connect/releases/$ZJU_RELEASE_PATH/zju-connect-linux-$ZJU_ARCH.zip"
 unzip -o "zju-connect-linux-$ZJU_ARCH.zip"
-cp zju-connect AppDir/usr/bin/
+# 重命名为固定名 zju-connect-legacy
+cp zju-connect AppDir/usr/bin/zju-connect-legacy
 rm "zju-connect-linux-$ZJU_ARCH.zip"
 
 # Copy icon
