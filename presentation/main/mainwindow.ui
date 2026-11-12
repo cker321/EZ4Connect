@@ -185,128 +185,12 @@
           <number>16</number>
          </property>
          <item>
-          <widget class="QLabel" name="connectionEyebrowLabel">
-           <property name="text">
-            <string>VPN 连接</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <layout class="QHBoxLayout" name="statusLayout">
-           <property name="spacing">
-            <number>9</number>
-           </property>
-           <item>
-            <widget class="QLabel" name="statusIndicator">
-             <property name="minimumSize">
-              <size>
-               <width>10</width>
-               <height>10</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>10</width>
-               <height>10</height>
-              </size>
-             </property>
-             <property name="text">
-              <string/>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLabel" name="statusTitleLabel">
-             <property name="text">
-              <string>尚未连接</string>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <spacer name="statusSpacer">
-             <property name="orientation">
-              <enum>Qt::Orientation::Horizontal</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>20</width>
-               <height>20</height>
-              </size>
-             </property>
-            </spacer>
-           </item>
-          </layout>
-         </item>
-         <item>
-          <widget class="QLabel" name="statusDetailLabel">
-           <property name="text">
-            <string>连接后即可访问网络资源。</string>
-           </property>
-           <property name="wordWrap">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="pushButton1">
+          <widget class="QTabWidget" name="connectionTabs">
            <property name="minimumSize">
             <size>
              <width>0</width>
-             <height>48</height>
+             <height>320</height>
             </size>
-           </property>
-           <property name="text">
-            <string>连接服务器</string>
-           </property>
-           <property name="default">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="pushButton2">
-           <property name="minimumSize">
-            <size>
-             <width>0</width>
-             <height>42</height>
-            </size>
-           </property>
-           <property name="text">
-            <string>设置系统代理</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QFrame" name="controlDivider">
-           <property name="frameShape">
-            <enum>QFrame::Shape::HLine</enum>
-           </property>
-           <property name="frameShadow">
-            <enum>QFrame::Shadow::Sunken</enum>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLabel" name="profileEyebrowLabel">
-           <property name="text">
-            <string>当前配置</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLabel" name="profileNameLabel">
-           <property name="text">
-            <string>默认</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLabel" name="profileDetailLabel">
-           <property name="text">
-            <string>EasyConnect · 等待连接</string>
-           </property>
-           <property name="wordWrap">
-            <bool>true</bool>
            </property>
           </widget>
          </item>
@@ -566,8 +450,7 @@
  <tabstops>
   <tabstop>guidePushButton</tabstop>
   <tabstop>settingPushButton</tabstop>
-  <tabstop>pushButton1</tabstop>
-  <tabstop>pushButton2</tabstop>
+  <tabstop>connectionTabs</tabstop>
   <tabstop>logPlainTextEdit</tabstop>
   <tabstop>copyLogPushButton</tabstop>
   <tabstop>clearLogPushButton</tabstop>

@@ -53,6 +53,18 @@ QStringList ProfileService::profiles() const
     return profileBackend->listProfiles();
 }
 
+QSettings *ProfileService::settingsFor(const QString &profileId) const
+{
+    if (!QFileInfo::exists(profileBackend->profilePath(profileId)))
+    {
+        return nullptr;
+    }
+    return new QSettings(
+        profileBackend->profilePath(profileId),
+        QSettings::IniFormat
+    );
+}
+
 bool ProfileService::usesOverrideConfiguration() const
 {
     return overrideConfiguration;

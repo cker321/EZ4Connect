@@ -57,6 +57,36 @@ bool ConnectionSession::start(const ConnectionProfile &profile, const ReconnectP
     return true;
 }
 
+void ConnectionSession::setAllocatedPorts(int socksPort, int httpPort)
+{
+    allocatedSocksPort = socksPort;
+    allocatedHttpPort = httpPort;
+    hasAllocatedPorts = socksPort > 0 && httpPort > 0;
+}
+
+int ConnectionSession::socksPort() const
+{
+    if (hasAllocatedPorts)
+    {
+        return allocatedSocksPort;
+    }
+    // Fall back to the port parsed from the running profile's bind address.
+    const QString bind = currentProfile.proxy.socksBind;
+    const int colon = bind.lastIndexOf(':');
+    return colon >= 0 ? bind.mid(colon + 1).toInt() : 0;
+}
+
+int ConnectionSession::httpPort() const
+{
+    if (hasAllocatedPorts)
+    {
+        return allocatedHttpPort;
+    }
+    const QString bind = currentProfile.proxy.httpBind;
+    const int colon = bind.lastIndexOf(':');
+    return colon >= 0 ? bind.mid(colon + 1).toInt() : 0;
+}
+
 void ConnectionSession::stop()
 {
     const ConnectionState previousState = sessionState.state();
@@ -116,6 +146,28 @@ bool ConnectionSession::isActive() const
 void ConnectionSession::startCore()
 {
     sudoPasswordSubmitted = false;
+
+    if (hasAllocatedPorts)
+    {
+        // Rewrite the proxy bind addresses to the uniquely allocated ports.
+        // The original bind prefix (127.0.0.1 / [::]) is preserved.
+        const QString socksBind = currentProfile.proxy.socksBind;
+        const QString httpBind = currentProfile.proxy.httpBind;
+
+        auto rewritePort = [](const QString &bind, int port) -> QString
+        {
+            const int colon = bind.lastIndexOf(':');
+            if (colon < 0)
+            {
+                return bind + QStringLiteral(":") + QString::number(port);
+            }
+            return bind.left(colon + 1) + QString::number(port);
+        };
+
+        currentProfile.proxy.socksBind = rewritePort(socksBind, allocatedSocksPort);
+        currentProfile.proxy.httpBind = rewritePort(httpBind, allocatedHttpPort);
+    }
+
     coreProcess->start(currentProfile);
 }
 

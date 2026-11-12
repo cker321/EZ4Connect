@@ -21,6 +21,15 @@ public:
     void cancelInteractiveInput();
     void submitSudoPassword(const QString &password, bool remember);
 
+    // Override the SOCKS/HTTP ports used by the next start(). Used by the
+    // ConnectionSessionManager to give each session unique ports.
+    void setAllocatedPorts(int socksPort, int httpPort);
+
+    // The ports actually bound by the core process (allocated ports when set,
+    // otherwise the ports read back from the profile after start).
+    int socksPort() const;
+    int httpPort() const;
+
     ConnectionState state() const;
     bool isActive() const;
 
@@ -49,6 +58,9 @@ private:
     ConnectionProfile currentProfile;
     QString savedSudoPassword;
     bool sudoPasswordSubmitted = false;
+    int allocatedSocksPort = 0;
+    int allocatedHttpPort = 0;
+    bool hasAllocatedPorts = false;
 };
 
 #endif // CONNECTIONSESSION_H

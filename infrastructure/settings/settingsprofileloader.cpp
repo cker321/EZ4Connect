@@ -30,7 +30,7 @@ ConnectionProfile SettingsProfileLoader::load(
                   settings.value("Credential/CertPassword", "").toByteArray()
               )
             : QString(),
-        settings.value("ZJUConnect/CredentialsAsArguments", false).toBool()
+        settings.value("ZJUConnect/CredentialsAsArguments", true).toBool()
     };
 
     const QString countryCode = settings.value("ZJUConnect/PhoneCountryCode").toString();

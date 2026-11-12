@@ -12,23 +12,27 @@ class QAction;
 class ApplicationLogger;
 class AuthDialogCoordinator;
 class ConnectionSession;
+class ConnectionSessionManager;
 class QPushButton;
 class QSettings;
 class SystemProxySession;
 class QWidget;
 
+// Controls one tab's connection controls. Each VPN profile tab owns its own
+// ConnectionUiController bound to the profile's dedicated ConnectionSession,
+// so multiple connections can be driven independently.
 class ConnectionUiController : public QObject
 {
     Q_OBJECT
 
 public:
     using SettingsProvider = std::function<QSettings *()>;
-    using ProfileIdProvider = std::function<QString()>;
     using NotificationHandler = std::function<void(
         const QString &title,
         const QString &content,
         QSystemTrayIcon::MessageIcon icon
     )>;
+    using PortOverrideProvider = std::function<void(int &socksPort, int &httpPort)>;
 
     ConnectionUiController(
         QWidget *parentWidget,
@@ -40,10 +44,13 @@ public:
         AuthDialogCoordinator *authenticationDialogs,
         ApplicationLogger *applicationLogger,
         SettingsProvider settingsProvider,
-        ProfileIdProvider profileIdProvider,
+        QString profileId,
         NotificationHandler notificationHandler,
         QObject *parent = nullptr
     );
+
+    // Let the UI reflect the current session state (used on tab switch / init).
+    void refreshButtonState();
 
 private:
     void handleConnectClicked();
@@ -64,7 +71,7 @@ private:
     SystemProxySession *systemProxySession;
     AuthDialogCoordinator *authenticationDialogs;
     SettingsProvider settingsProvider;
-    ProfileIdProvider profileIdProvider;
+    QString profileId;
     NotificationHandler notificationHandler;
 };
 

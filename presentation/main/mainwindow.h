@@ -6,8 +6,10 @@
 #include <QCloseEvent>
 #include <QSettings>
 #include <QPointer>
+#include <QHash>
 
 #include "application/connectionsession.h"
+#include "application/connectionsessionmanager.h"
 #include "application/profileservice.h"
 #include "application/systemproxysession.h"
 #include "presentation/dialogs/settingwindow/settingwindow.h"
@@ -23,6 +25,23 @@ class ApplicationLogger;
 class ApplicationLogFile;
 class ConnectionUiController;
 class UpdateChecker;
+class QLabel;
+class QPushButton;
+class QTabWidget;
+class QWidget;
+
+// Per-tab connection controls, created dynamically for each VPN profile.
+struct ConnectionTabWidgets
+{
+    QWidget *page = nullptr;
+    QLabel *statusIndicator = nullptr;
+    QLabel *statusTitleLabel = nullptr;
+    QLabel *statusDetailLabel = nullptr;
+    QPushButton *connectButton = nullptr;
+    QPushButton *proxyButton = nullptr;
+    QLabel *profileNameLabel = nullptr;
+    QLabel *profileDetailLabel = nullptr;
+};
 
 class MainWindow : public QMainWindow
 {
@@ -57,6 +76,8 @@ private:
 
     void updateConnectionState(ConnectionState state);
 
+    void updateTabConnectionState(const QString &profileId, ConnectionState state);
+
     void updateProfileSummary();
 
     void showNotification(
@@ -72,6 +93,10 @@ private:
     void setupProfileMenu();
 
     void refreshProfileMenu();
+
+    void setupConnectionTabs();
+
+    void addConnectionTab(const QString &profileId, bool makeCurrent);
 
     bool switchProfile(const QString &profileId);
 
@@ -92,6 +117,16 @@ private:
 
     void gracefullyQuit();
 
+    // Build the per-tab widgets for one profile and wire a controller.
+    void buildTabPage(const QString &profileId, ConnectionTabWidgets &widgets);
+
+    // Return the (cached) settings for a profile. The default profile maps to
+    // the active `settings` member; named profiles get their own persistent
+    // QSettings owned by MainWindow.
+    QSettings *settingsForProfile(const QString &profileId);
+
+    QString activeTabProfileId() const;
+
     Ui::MainWindow *ui;
     QSystemTrayIcon *trayIcon;
     QMenu *trayMenu;
@@ -102,17 +137,23 @@ private:
     QAction *newProfileAction;
     QAction *renameProfileAction;
     QAction *deleteProfileAction;
-    ConnectionSession *connectionSession = nullptr;
+
+    ConnectionSessionManager *sessionManager = nullptr;
     SystemProxySession *systemProxySession = nullptr;
     AuthDialogCoordinator *authenticationDialogs = nullptr;
-    ConnectionUiController *connectionUiController;
     MainWindowCoordinator *coordinator;
     ApplicationLogger *applicationLogger;
     ApplicationLogFile *applicationLogFile;
     UpdateChecker *updateChecker;
     QSettings *settings;
     ProfileService *profileService;
-    QString currentProfileId;
+
+    // Per-profile tab page widgets and controllers.
+    QHash<QString, ConnectionTabWidgets> tabWidgets;
+    QHash<QString, ConnectionUiController *> tabControllers;
+
+    // Per-profile persistent settings (owned by MainWindow, freed on destruction).
+    QHash<QString, QSettings *> profileSettings;
 
     QPointer<SettingWindow> settingWindow;
 

@@ -29,7 +29,7 @@ ConnectionUiController::ConnectionUiController(
     AuthDialogCoordinator *authenticationDialogs,
     ApplicationLogger *applicationLogger,
     SettingsProvider settingsProvider,
-    ProfileIdProvider profileIdProvider,
+    QString profileId,
     NotificationHandler notificationHandler,
     QObject *parent
 )
@@ -42,11 +42,10 @@ ConnectionUiController::ConnectionUiController(
       systemProxySession(systemProxySession),
       authenticationDialogs(authenticationDialogs),
       settingsProvider(std::move(settingsProvider)),
-      profileIdProvider(std::move(profileIdProvider)),
+      profileId(std::move(profileId)),
       notificationHandler(std::move(notificationHandler))
 {
     connectButton->setText("连接服务器");
-    trayConnectAction->setText("连接服务器");
     proxyButton->setText("设置系统代理");
     proxyButton->hide();
 
@@ -131,7 +130,6 @@ ConnectionUiController::ConnectionUiController(
                 );
             }
             this->connectButton->setText("连接服务器");
-            this->trayConnectAction->setText("连接服务器");
             this->proxyButton->hide();
             if (this->connectionSession->state() != ConnectionState::Interrupted)
             {
@@ -151,7 +149,22 @@ ConnectionUiController::ConnectionUiController(
         this,
         &ConnectionUiController::handleProxyClicked
     );
+}
 
+void ConnectionUiController::refreshButtonState()
+{
+    if (connectionSession->isActive())
+    {
+        connectButton->setText("断开服务器");
+        trayConnectAction->setText("断开服务器");
+        proxyButton->show();
+    }
+    else
+    {
+        connectButton->setText("连接服务器");
+        trayConnectAction->setText("连接服务器");
+        proxyButton->hide();
+    }
 }
 
 QSettings *ConnectionUiController::settings() const
@@ -265,8 +278,17 @@ void ConnectionUiController::handleProxyClicked()
         return;
     }
 
-    const int httpPort = settings()->value("ZJUConnect/HTTPPort").toInt();
-    const int socksPort = settings()->value("ZJUConnect/SOCKS5Port").toInt();
+    // Prefer the ports the core process actually bound (PortAllocator may have
+    // shifted them away from the configured base ports when they were busy).
+    // Fall back to the configured values when the session hasn't allocated any.
+    const int configuredHttpPort = settings()->value("ZJUConnect/HTTPPort").toInt();
+    const int configuredSocksPort = settings()->value("ZJUConnect/SOCKS5Port").toInt();
+    const int httpPort = connectionSession->httpPort() > 0
+        ? connectionSession->httpPort()
+        : configuredHttpPort;
+    const int socksPort = connectionSession->socksPort() > 0
+        ? connectionSession->socksPort()
+        : configuredSocksPort;
     const SystemProxyConfig proxyConfig{
         httpPort,
         socksPort,
@@ -335,7 +357,7 @@ void ConnectionUiController::startConnection(
 {
     ConnectionProfile profile = SettingsProfileLoader::load(
         *settings(),
-        profileIdProvider(),
+        profileId,
         username,
         password
     );

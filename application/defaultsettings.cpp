@@ -30,7 +30,7 @@ void DefaultSettings::reset(QSettings &settings)
     settings.setValue("ZJUConnect/ShadowsocksURL", "");
     settings.setValue("ZJUConnect/DialDirectProxy", "");
     settings.setValue("ZJUConnect/UpdateBestNodesInterval", 300);
-    settings.setValue("ZJUConnect/CredentialsAsArguments", false);
+    settings.setValue("ZJUConnect/CredentialsAsArguments", true);
 
     settings.setValue("ZJUConnect/Protocol", "atrust");
     settings.setValue("ZJUConnect/EasyConnectAuthType", "password");

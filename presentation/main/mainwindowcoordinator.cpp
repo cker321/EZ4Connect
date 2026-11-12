@@ -3,9 +3,9 @@
 #include <memory>
 
 #include "application/connectionsession.h"
+#include "application/connectionsessionmanager.h"
 #include "application/profileservice.h"
 #include "application/systemproxysession.h"
-#include "infrastructure/coreprocess/zjuconnectprocess.h"
 #include "infrastructure/platform/platformsystemproxybackend.h"
 #include "infrastructure/settings/profilemanager.h"
 #include "infrastructure/update/updatechecker.h"
@@ -22,7 +22,7 @@ MainWindowCoordinator::MainWindowCoordinator(
           overrideConfigPath,
           this
       )),
-      connectionSession(new ConnectionSession(new ZjuConnectProcess(), this)),
+      sessionManager(new ConnectionSessionManager(this)),
       systemProxySession(new SystemProxySession(
           std::make_unique<PlatformSystemProxyBackend>(),
           this
@@ -35,85 +35,69 @@ MainWindowCoordinator::MainWindowCoordinator(
       ))
 {
     connect(
-        connectionSession,
-        &ConnectionSession::askSudoPass,
-        authenticationCoordinator,
-        &AuthDialogCoordinator::requestSudoPassword
-    );
-    connect(
-        connectionSession,
-        &ConnectionSession::graphCaptcha,
-        authenticationCoordinator,
-        &AuthDialogCoordinator::requestGraphCaptcha
-    );
-    connect(
-        connectionSession,
-        &ConnectionSession::smsCode,
-        authenticationCoordinator,
-        &AuthDialogCoordinator::requestSmsCode
-    );
-    connect(
-        connectionSession,
-        &ConnectionSession::totpCode,
-        authenticationCoordinator,
-        &AuthDialogCoordinator::requestTotpCode
-    );
-    connect(
-        connectionSession,
-        &ConnectionSession::randCode,
-        authenticationCoordinator,
-        [this]() { authenticationCoordinator->requestSmsCode(false); }
-    );
-    connect(
-        connectionSession,
-        &ConnectionSession::radiusCode,
-        authenticationCoordinator,
-        &AuthDialogCoordinator::requestRadiusCode
-    );
-    connect(
-        connectionSession,
-        &ConnectionSession::ssoAuth,
-        authenticationCoordinator,
-        &AuthDialogCoordinator::requestSsoLogin
-    );
-    connect(
-        authenticationCoordinator,
-        &AuthDialogCoordinator::sudoPasswordSubmitted,
-        connectionSession,
-        &ConnectionSession::submitSudoPassword
-    );
-    connect(
-        authenticationCoordinator,
-        &AuthDialogCoordinator::interactiveInputSubmitted,
-        connectionSession,
-        &ConnectionSession::submitInput
-    );
-    connect(
-        authenticationCoordinator,
-        &AuthDialogCoordinator::interactiveInputCancelled,
-        connectionSession,
-        &ConnectionSession::cancelInteractiveInput
-    );
-
-    connect(
         systemProxySession,
         &SystemProxySession::operationFinished,
         this,
         [this](bool enabled)
         {
-            if (enabled && !connectionSession->isActive())
+            if (enabled && !sessionManager->anyActive())
             {
                 systemProxySession->disable();
             }
         }
     );
+
     connect(
-        connectionSession,
-        &ConnectionSession::finished,
+        authenticationCoordinator,
+        &AuthDialogCoordinator::sudoPasswordSubmitted,
         this,
-        [this](ZJU_ERROR)
+        [this](const QString &password, bool remember)
         {
-            if (systemProxySession->isEnabled())
+            ConnectionSession *session =
+                sessionManager->find(activeAuthProfileId);
+            if (session != nullptr)
+            {
+                session->submitSudoPassword(password, remember);
+            }
+        }
+    );
+    connect(
+        authenticationCoordinator,
+        &AuthDialogCoordinator::interactiveInputSubmitted,
+        this,
+        [this](const QByteArray &input)
+        {
+            ConnectionSession *session =
+                sessionManager->find(activeAuthProfileId);
+            if (session != nullptr)
+            {
+                session->submitInput(input);
+            }
+        }
+    );
+    connect(
+        authenticationCoordinator,
+        &AuthDialogCoordinator::interactiveInputCancelled,
+        this,
+        [this]()
+        {
+            ConnectionSession *session =
+                sessionManager->find(activeAuthProfileId);
+            if (session != nullptr)
+            {
+                session->cancelInteractiveInput();
+            }
+        }
+    );
+
+    connect(
+        sessionManager,
+        &ConnectionSessionManager::systemProxyOwnerChanged,
+        this,
+        [this](const QString &)
+        {
+            if (systemProxySession->isEnabled()
+                && sessionManager->systemProxyOwnerId().isEmpty())
             {
                 systemProxySession->disable();
             }
@@ -126,9 +110,9 @@ ProfileService *MainWindowCoordinator::profiles() const
     return profileService;
 }
 
-ConnectionSession *MainWindowCoordinator::connection() const
+ConnectionSessionManager *MainWindowCoordinator::sessions() const
 {
-    return connectionSession;
+    return sessionManager;
 }
 
 SystemProxySession *MainWindowCoordinator::systemProxy() const
@@ -150,4 +134,54 @@ MainWindowCoordinator::authenticationDialogs() const
 void MainWindowCoordinator::prepareForShutdown()
 {
     systemProxySession->clearBeforeShutdown();
+    sessionManager->stopAll();
+}
+
+void MainWindowCoordinator::wireSession(
+    const QString &profileId,
+    ConnectionSession *session
+)
+{
+    connect(session, &ConnectionSession::askSudoPass, this,
+        [this, profileId]()
+        {
+            activeAuthProfileId = profileId;
+            authenticationCoordinator->requestSudoPassword();
+        });
+    connect(session, &ConnectionSession::graphCaptcha, this,
+        [this, profileId](const QString &graphFile)
+        {
+            activeAuthProfileId = profileId;
+            authenticationCoordinator->requestGraphCaptcha(graphFile);
+        });
+    connect(session, &ConnectionSession::smsCode, this,
+        [this, profileId](bool showSkip)
+        {
+            activeAuthProfileId = profileId;
+            authenticationCoordinator->requestSmsCode(showSkip);
+        });
+    connect(session, &ConnectionSession::totpCode, this,
+        [this, profileId]()
+        {
+            activeAuthProfileId = profileId;
+            authenticationCoordinator->requestTotpCode();
+        });
+    connect(session, &ConnectionSession::randCode, this,
+        [this, profileId]()
+        {
+            activeAuthProfileId = profileId;
+            authenticationCoordinator->requestSmsCode(false);
+        });
+    connect(session, &ConnectionSession::radiusCode, this,
+        [this, profileId](bool showSkip)
+        {
+            activeAuthProfileId = profileId;
+            authenticationCoordinator->requestRadiusCode(showSkip);
+        });
+    connect(session, &ConnectionSession::ssoAuth, this,
+        [this, profileId]()
+        {
+            activeAuthProfileId = profileId;
+            authenticationCoordinator->requestSsoLogin();
+        });
 }

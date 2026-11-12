@@ -15,6 +15,10 @@
 #include <QStyle>
 #include <QStyleHints>
 #include <QTimer>
+#include <QLabel>
+#include <QPushButton>
+#include <QTabWidget>
+#include <QVBoxLayout>
 
 #include "mainwindow.h"
 
@@ -62,7 +66,7 @@ MainWindow::MainWindow(
         CommandLineOptions::value(QCoreApplication::arguments(), "--config-path");
     coordinator = new MainWindowCoordinator(this, overrideConfigPath, this);
     profileService = coordinator->profiles();
-    currentProfileId = profileService->currentProfileId();
+    sessionManager = coordinator->sessions();
     settings = profileService->settings();
 
     const bool isFirstLaunch =
@@ -82,7 +86,6 @@ MainWindow::MainWindow(
     connect(styleHints, &QStyleHints::colorSchemeChanged,
             this, &MainWindow::applyColorScheme);
     authenticationDialogs = coordinator->authenticationDialogs();
-    connectionSession = coordinator->connection();
     systemProxySession = coordinator->systemProxy();
     updateChecker = coordinator->updates();
     connect(updateChecker, &UpdateChecker::versionInfoChanged, this,
@@ -127,22 +130,37 @@ MainWindow::MainWindow(
     connect(systemProxySession, &SystemProxySession::busyChanged, this,
             [this](bool busy)
             {
-                ui->pushButton2->setEnabled(!busy);
+                const QString profileId = activeTabProfileId();
+                if (!tabWidgets.contains(profileId))
+                {
+                    return;
+                }
+                tabWidgets[profileId].proxyButton->setEnabled(!busy);
                 ui->disableProxyAction->setEnabled(!busy);
             });
     connect(systemProxySession, &SystemProxySession::enabledChanged, this,
             [this](bool enabled)
             {
-                ui->pushButton2->setText(enabled ? "清除系统代理" : "设置系统代理");
-                if (!enabled && connectionSession != nullptr && !connectionSession->isActive())
+                const QString profileId = activeTabProfileId();
+                if (tabWidgets.contains(profileId))
                 {
-                    ui->pushButton2->hide();
+                    tabWidgets[profileId].proxyButton->setText(
+                        enabled ? "清除系统代理" : "设置系统代理"
+                    );
+                    if (!enabled && !sessionManager->anyActive())
+                    {
+                        tabWidgets[profileId].proxyButton->hide();
+                    }
+                    ConnectionSession *session = sessionManager->find(profileId);
+                    if (session != nullptr)
+                    {
+                        updateTabConnectionState(profileId, session->state());
+                    }
                 }
-                updateProfileSummary();
-                updateConnectionState(connectionSession->state());
             });
     setupTrayIcon();
     setupProfileMenu();
+    setupConnectionTabs();
 
     setWindowIcon(QIcon(QPixmap(":/resource/icon.png").scaled(
         512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation
@@ -151,11 +169,6 @@ MainWindow::MainWindow(
     ui->applicationNameLabel->setText(QApplication::applicationDisplayName());
 
     updateVersionInfo();
-    updateConnectionState(connectionSession->state());
-
-    connect(connectionSession, &ConnectionSession::stateChanged, this,
-            &MainWindow::updateConnectionState);
-
 
     // 文件-退出
     connect(ui->exitAction, &QAction::triggered, this, &MainWindow::gracefullyQuit);
@@ -164,7 +177,8 @@ MainWindow::MainWindow(
     connect(ui->settingAction, &QAction::triggered, this,
             [&]()
             {
-                settingWindow = new SettingWindow(this, settings, currentProfileId);
+                const QString profileId = activeTabProfileId();
+                settingWindow = new SettingWindow(this, settings, profileId);
                 settingWindow->show();
             });
 
@@ -238,7 +252,8 @@ MainWindow::MainWindow(
                     return;
                 }
 
-                ApplicationPaths::clearClientData(currentProfileId);
+                const QString profileId = activeTabProfileId();
+                ApplicationPaths::clearClientData(profileId);
                 qInfo().noquote() << "已清理登录缓存";
             });
 
@@ -246,13 +261,15 @@ MainWindow::MainWindow(
     connect(ui->trustDeviceAction, &QAction::triggered, this,
             [&]()
             {
+                const QString profileId = activeTabProfileId();
+                QSettings *profileSettings = settingsForProfile(profileId);
                 try
                 {
                     DeviceTrust::set(this,
-                        settings->value("ZJUConnect/Protocol", "easyconnect").toString(),
-                        settings->value("ZJUConnect/ServerAddress").toString(),
-                        settings->value("ZJUConnect/ServerPort").toInt(),
-                        currentProfileId, true);
+                        profileSettings->value("ZJUConnect/Protocol", "easyconnect").toString(),
+                        profileSettings->value("ZJUConnect/ServerAddress").toString(),
+                        profileSettings->value("ZJUConnect/ServerPort").toInt(),
+                        profileId, true);
                     qInfo().noquote() << "设置授信设备成功";
                     QMessageBox::information(this, "成功", "已设置授信设备");
                 }
@@ -267,13 +284,15 @@ MainWindow::MainWindow(
     connect(ui->untrustDeviceAction, &QAction::triggered, this,
             [&]()
             {
+                const QString profileId = activeTabProfileId();
+                QSettings *profileSettings = settingsForProfile(profileId);
                 try
                 {
                     DeviceTrust::set(this,
-                        settings->value("ZJUConnect/Protocol", "easyconnect").toString(),
-                        settings->value("ZJUConnect/ServerAddress").toString(),
-                        settings->value("ZJUConnect/ServerPort").toInt(),
-                        currentProfileId, false);
+                        profileSettings->value("ZJUConnect/Protocol", "easyconnect").toString(),
+                        profileSettings->value("ZJUConnect/ServerAddress").toString(),
+                        profileSettings->value("ZJUConnect/ServerPort").toInt(),
+                        profileId, false);
                     qInfo().noquote() << "取消授信设备成功";
                     QMessageBox::information(this, "成功", "已取消授信设备");
                 }
@@ -322,27 +341,6 @@ MainWindow::MainWindow(
     );
 
     clearLog();
-    connectionUiController = new ConnectionUiController(
-        this,
-        ui->pushButton1,
-        ui->pushButton2,
-        trayConnectAction,
-        connectionSession,
-        systemProxySession,
-        authenticationDialogs,
-        applicationLogger,
-        [this]() { return settings; },
-        [this]() { return currentProfileId; },
-        [this](
-            const QString &title,
-            const QString &content,
-            QSystemTrayIcon::MessageIcon icon
-        )
-        {
-            showNotification(title, content, icon);
-        },
-        this
-    );
 
     bool shouldConnect =
         settings->value("Common/ConnectAfterStart", false).toBool();
@@ -352,7 +350,11 @@ MainWindow::MainWindow(
     }
     if (shouldConnect)
     {
-        ui->pushButton1->click();
+        const QString profileId = activeTabProfileId();
+        if (tabControllers.contains(profileId))
+        {
+            tabWidgets[profileId].connectButton->click();
+        }
     }
 
     if (settings->value("Common/CheckUpdateAfterStart", true).toBool())
@@ -380,7 +382,7 @@ MainWindow::MainWindow(
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    if (connectionSession != nullptr && connectionSession->isActive())
+    if (sessionManager->anyActive())
     {
         event->ignore();
         hide();
@@ -417,17 +419,20 @@ void MainWindow::clearLog()
         "欢迎使用 " + QApplication::applicationDisplayName() + "\n"
         "当前版本：" + QApplication::applicationVersion() + "\n"
         "系统版本：" + QSysInfo::prettyProductName() + "\n"
-        "当前配置：" + (currentProfileId.isEmpty() ? "默认" : currentProfileId) + "\n"
         "配置路径：" + settings->fileName() + "\n");
 }
 
 void MainWindow::resetZjuConnectUi()
 {
-    ui->pushButton1->setText("连接服务器");
-    trayConnectAction->setText("连接服务器");
-    ui->pushButton2->setText("设置系统代理");
-    ui->pushButton2->hide();
-    updateConnectionState(ConnectionState::Disconnected);
+    const QString profileId = activeTabProfileId();
+    if (tabWidgets.contains(profileId))
+    {
+        tabWidgets[profileId].connectButton->setText("连接服务器");
+        trayConnectAction->setText("连接服务器");
+        tabWidgets[profileId].proxyButton->setText("设置系统代理");
+        tabWidgets[profileId].proxyButton->hide();
+        updateTabConnectionState(profileId, ConnectionState::Disconnected);
+    }
     updateProfileSummary();
 }
 
@@ -449,6 +454,18 @@ void MainWindow::applyColorScheme(Qt::ColorScheme scheme)
 
 void MainWindow::updateConnectionState(ConnectionState state)
 {
+    updateTabConnectionState(activeTabProfileId(), state);
+}
+
+void MainWindow::updateTabConnectionState(const QString &profileId, ConnectionState state)
+{
+    if (!tabWidgets.contains(profileId))
+    {
+        return;
+    }
+
+    const ConnectionTabWidgets &w = tabWidgets[profileId];
+
     QString propertyValue;
     QString title;
     QString detail;
@@ -494,12 +511,12 @@ void MainWindow::updateConnectionState(ConnectionState state)
         break;
     }
 
-    ui->statusTitleLabel->setText(title);
-    ui->statusDetailLabel->setText(detail);
+    w.statusTitleLabel->setText(title);
+    w.statusDetailLabel->setText(detail);
 
     const QList<QWidget *> styledWidgets{
-        ui->statusIndicator,
-        ui->pushButton1
+        w.statusIndicator,
+        w.connectButton
     };
     for (QWidget *widget : styledWidgets)
     {
@@ -512,10 +529,19 @@ void MainWindow::updateConnectionState(ConnectionState state)
 
 void MainWindow::updateProfileSummary()
 {
-    const QString profileName = currentProfileId.isEmpty()
+    const QString profileId = activeTabProfileId();
+    if (!tabWidgets.contains(profileId))
+    {
+        return;
+    }
+
+    QSettings *profileSettings = settingsForProfile(profileId);
+
+    const ConnectionTabWidgets &w = tabWidgets[profileId];
+    const QString profileName = profileId.isEmpty()
         ? QStringLiteral("默认")
-        : currentProfileId;
-    const QString protocolSetting = settings->value(
+        : profileId;
+    const QString protocolSetting = profileSettings->value(
         "ZJUConnect/Protocol",
         "easyconnect"
     ).toString();
@@ -523,20 +549,19 @@ void MainWindow::updateProfileSummary()
         "atrust",
         Qt::CaseInsensitive
     ) == 0 ? QStringLiteral("aTrust") : QStringLiteral("EasyConnect");
-    const QString server = settings->value(
+    const QString server = profileSettings->value(
         "ZJUConnect/ServerAddress"
     ).toString().trimmed();
 
     QStringList details{protocol};
     details.append(server.isEmpty() ? QStringLiteral("尚未配置服务器") : server);
 
-    ui->profileNameLabel->setText(profileName);
-    ui->profileDetailLabel->setText(details.join(QStringLiteral(" · ")));
+    w.profileNameLabel->setText(profileName);
+    w.profileDetailLabel->setText(details.join(QStringLiteral(" · ")));
 }
 
 void MainWindow::setupTrayIcon()
 {
-    // 系统托盘
     trayIcon = new QSystemTrayIcon(this);
     trayIcon->setIcon(
         QIcon(QPixmap(":/resource/icon.png").scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
@@ -568,7 +593,13 @@ void MainWindow::setupTrayIcon()
     trayMenu->addSeparator();
     trayMenu->addAction(trayShowAction);
     trayMenu->addAction(trayCloseAction);
-    connect(trayConnectAction, &QAction::triggered, this, [&]() { ui->pushButton1->click(); });
+    connect(trayConnectAction, &QAction::triggered, this, [&]() {
+        const QString profileId = activeTabProfileId();
+        if (tabWidgets.contains(profileId))
+        {
+            tabWidgets[profileId].connectButton->click();
+        }
+    });
     connect(trayShowAction, &QAction::triggered, this, [&]() {
         show();
         setWindowState(Qt::WindowState::WindowActive);
@@ -581,7 +612,6 @@ void MainWindow::setupTrayIcon()
 
 void MainWindow::setupProfileMenu()
 {
-    // 务必在 setupTrayIcon 之后调用，以确保 trayProfileMenu 已正确初始化
     ui->profileMenu->addSeparator();
     newProfileAction = ui->profileMenu->addAction("新建配置");
     renameProfileAction = ui->profileMenu->addAction("重命名当前配置");
@@ -626,21 +656,17 @@ void MainWindow::refreshProfileMenu()
         }
     }
 
-    QActionGroup *switchGroup = new QActionGroup(ui->profileMenu);
-    QActionGroup *traySwitchGroup = nullptr;
-
     if (trayProfileMenu != nullptr)
     {
         trayProfileMenu->clear();
-        traySwitchGroup = new QActionGroup(trayProfileMenu);
-        traySwitchGroup->setExclusive(true);
     }
 
-    switchGroup->setExclusive(true);
+    const QString activeId = activeTabProfileId();
+
+    // 默认配置项
     QAction *action = ui->profileMenu->addAction("默认");
     action->setCheckable(true);
-    action->setChecked(currentProfileId.isEmpty());
-    switchGroup->addAction(action);
+    action->setChecked(activeId.isEmpty());
     connect(action, &QAction::triggered, this, [this]()
     {
         switchProfile("");
@@ -649,8 +675,7 @@ void MainWindow::refreshProfileMenu()
     {
         QAction *trayAction = trayProfileMenu->addAction("默认");
         trayAction->setCheckable(true);
-        trayAction->setChecked(currentProfileId.isEmpty());
-        traySwitchGroup->addAction(trayAction);
+        trayAction->setChecked(activeId.isEmpty());
         connect(trayAction, &QAction::triggered, this, [this]()
         {
             switchProfile("");
@@ -659,14 +684,10 @@ void MainWindow::refreshProfileMenu()
 
     for (const QString &profileId : profileService->profiles())
     {
-        QAction *action = ui->profileMenu->addAction(profileId);
-        action->setCheckable(true);
-        action->setChecked(
-            !profileService->usesOverrideConfiguration()
-            && profileId == currentProfileId
-        );
-        switchGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [this, profileId]()
+        QAction *profileAction = ui->profileMenu->addAction(profileId);
+        profileAction->setCheckable(true);
+        profileAction->setChecked(profileId == activeId);
+        connect(profileAction, &QAction::triggered, this, [this, profileId]()
         {
             switchProfile(profileId);
         });
@@ -675,11 +696,7 @@ void MainWindow::refreshProfileMenu()
         {
             QAction *trayAction = trayProfileMenu->addAction(profileId);
             trayAction->setCheckable(true);
-            trayAction->setChecked(
-                !profileService->usesOverrideConfiguration()
-                && profileId == currentProfileId
-            );
-            traySwitchGroup->addAction(trayAction);
+            trayAction->setChecked(profileId == activeId);
             connect(trayAction, &QAction::triggered, this, [this, profileId]()
             {
                 switchProfile(profileId);
@@ -688,59 +705,231 @@ void MainWindow::refreshProfileMenu()
     }
 
     const bool currentProfileIsManaged =
-        !currentProfileId.isEmpty()
+        !activeId.isEmpty()
         && !profileService->usesOverrideConfiguration();
     renameProfileAction->setEnabled(currentProfileIsManaged);
     deleteProfileAction->setEnabled(currentProfileIsManaged);
 }
 
+void MainWindow::setupConnectionTabs()
+{
+    // Ensure the default profile tab exists.
+    addConnectionTab("", true);
+
+    for (const QString &profileId : profileService->profiles())
+    {
+        addConnectionTab(profileId, false);
+    }
+
+    // When the active tab changes, refresh the tray connect action text.
+    connect(ui->connectionTabs, &QTabWidget::currentChanged, this,
+        [this](int)
+        {
+            const QString profileId = activeTabProfileId();
+            if (tabControllers.contains(profileId))
+            {
+                tabControllers[profileId]->refreshButtonState();
+            }
+            refreshProfileMenu();
+            updateProfileSummary();
+        });
+}
+
+void MainWindow::buildTabPage(const QString &profileId, ConnectionTabWidgets &widgets)
+{
+    widgets.page = new QWidget(ui->connectionTabs);
+    auto *layout = new QVBoxLayout(widgets.page);
+    layout->setSpacing(12);
+    layout->setContentsMargins(16, 16, 16, 16);
+
+    // 状态行
+    auto *statusLayout = new QHBoxLayout;
+    statusLayout->setSpacing(9);
+    widgets.statusIndicator = new QLabel(widgets.page);
+    widgets.statusIndicator->setMinimumSize(10, 10);
+    widgets.statusIndicator->setMaximumSize(10, 10);
+    widgets.statusIndicator->setObjectName("statusIndicator");
+    statusLayout->addWidget(widgets.statusIndicator);
+
+    widgets.statusTitleLabel = new QLabel("尚未连接", widgets.page);
+    widgets.statusTitleLabel->setObjectName("statusTitleLabel");
+    statusLayout->addWidget(widgets.statusTitleLabel);
+    statusLayout->addStretch();
+    layout->addLayout(statusLayout);
+
+    widgets.statusDetailLabel = new QLabel("连接后即可访问网络资源。", widgets.page);
+    widgets.statusDetailLabel->setObjectName("statusDetailLabel");
+    widgets.statusDetailLabel->setWordWrap(true);
+    layout->addWidget(widgets.statusDetailLabel);
+
+    widgets.connectButton = new QPushButton("连接服务器", widgets.page);
+    widgets.connectButton->setObjectName("connectButton");
+    widgets.connectButton->setMinimumHeight(48);
+    widgets.connectButton->setDefault(true);
+    layout->addWidget(widgets.connectButton);
+
+    widgets.proxyButton = new QPushButton("设置系统代理", widgets.page);
+    widgets.proxyButton->setObjectName("proxyButton");
+    widgets.proxyButton->setMinimumHeight(42);
+    widgets.proxyButton->hide();
+    layout->addWidget(widgets.proxyButton);
+
+    // 分割线
+    auto *divider = new QFrame(widgets.page);
+    divider->setFrameShape(QFrame::HLine);
+    divider->setFrameShadow(QFrame::Sunken);
+    layout->addWidget(divider);
+
+    widgets.profileNameLabel = new QLabel("默认", widgets.page);
+    widgets.profileNameLabel->setObjectName("profileNameLabel");
+    layout->addWidget(widgets.profileNameLabel);
+
+    widgets.profileDetailLabel = new QLabel("EasyConnect · 等待连接", widgets.page);
+    widgets.profileDetailLabel->setObjectName("profileDetailLabel");
+    widgets.profileDetailLabel->setWordWrap(true);
+    layout->addWidget(widgets.profileDetailLabel);
+
+    layout->addStretch();
+
+    const QString tabTitle = profileId.isEmpty()
+        ? QStringLiteral("默认")
+        : profileId;
+    ui->connectionTabs->addTab(widgets.page, tabTitle);
+}
+
+void MainWindow::addConnectionTab(const QString &profileId, bool makeCurrent)
+{
+    if (tabWidgets.contains(profileId))
+    {
+        return;
+    }
+
+    ConnectionTabWidgets widgets;
+    buildTabPage(profileId, widgets);
+    tabWidgets.insert(profileId, widgets);
+
+    // Determine base ports from this profile's own settings.
+    QSettings *profileSettings = settingsForProfile(profileId);
+    const int baseSocks = profileSettings->value("ZJUConnect/SOCKS5Port", 11080).toInt();
+    const int baseHttp = profileSettings->value("ZJUConnect/HTTPPort", 11081).toInt();
+
+    ConnectionSession *session = sessionManager->sessionFor(profileId, baseSocks, baseHttp);
+    coordinator->wireSession(profileId, session);
+
+    // Wire session state changes to the tab's UI.
+    connect(session, &ConnectionSession::stateChanged, this,
+        [this, profileId](ConnectionState state)
+        {
+            updateTabConnectionState(profileId, state);
+            if (profileId == activeTabProfileId())
+            {
+                trayConnectAction->setText(
+                    state == ConnectionState::Running
+                        || state == ConnectionState::Starting
+                        || state == ConnectionState::Reconnecting
+                        ? "断开服务器"
+                        : "连接服务器"
+                );
+            }
+        });
+
+    auto *controller = new ConnectionUiController(
+        this,
+        widgets.connectButton,
+        widgets.proxyButton,
+        trayConnectAction,
+        session,
+        systemProxySession,
+        authenticationDialogs,
+        applicationLogger,
+        [this, profileId]() -> QSettings *
+        {
+            return settingsForProfile(profileId);
+        },
+        profileId,
+        [this](
+            const QString &title,
+            const QString &content,
+            QSystemTrayIcon::MessageIcon icon
+        )
+        {
+            showNotification(title, content, icon);
+        },
+        this
+    );
+    tabControllers.insert(profileId, controller);
+
+    if (makeCurrent)
+    {
+        const int index = ui->connectionTabs->indexOf(widgets.page);
+        if (index >= 0)
+        {
+            ui->connectionTabs->setCurrentIndex(index);
+        }
+    }
+
+    updateProfileSummary();
+    updateTabConnectionState(profileId, session->state());
+}
+
+QString MainWindow::activeTabProfileId() const
+{
+    QWidget *current = ui->connectionTabs->currentWidget();
+    for (auto it = tabWidgets.cbegin(); it != tabWidgets.cend(); ++it)
+    {
+        if (it.value().page == current)
+        {
+            return it.key();
+        }
+    }
+    return QString();
+}
+
+QSettings *MainWindow::settingsForProfile(const QString &profileId)
+{
+    if (profileId.isEmpty())
+    {
+        return settings;
+    }
+    if (profileSettings.contains(profileId))
+    {
+        return profileSettings.value(profileId);
+    }
+    QSettings *s = profileService->settingsFor(profileId);
+    if (s == nullptr)
+    {
+        return settings;
+    }
+    profileSettings.insert(profileId, s);
+    return s;
+}
+
 bool MainWindow::switchProfile(const QString &profileId)
 {
-    if (!profileService->usesOverrideConfiguration()
-        && profileId == currentProfileId)
+    if (!tabWidgets.contains(profileId))
     {
-        return true;
+        addConnectionTab(profileId, true);
     }
 
-    if (connectionSession != nullptr && connectionSession->isActive())
+    const ConnectionTabWidgets &widgets = tabWidgets[profileId];
+    const int index = ui->connectionTabs->indexOf(widgets.page);
+    if (index >= 0)
     {
-        QMessageBox::warning(this, "切换失败", "请先断开 VPN 连接，再切换配置。");
-        refreshProfileMenu();
-        return false;
+        ui->connectionTabs->setCurrentIndex(index);
+    }
+    else
+    {
+        ui->connectionTabs->setCurrentWidget(widgets.page);
     }
 
-    if (settingWindow != nullptr)
-    {
-        settingWindow->close();
-    }
-
-    if (!profileService->switchTo(profileId))
-    {
-        refreshProfileMenu();
-        return false;
-    }
-    settings = profileService->settings();
-    authenticationDialogs->setSettings(settings);
-    currentProfileId = profileService->currentProfileId();
-
-    upgradeSettings();
-    updateVersionInfo();
-    resetZjuConnectUi();
-    clearLog();
     refreshProfileMenu();
-
-    qInfo().noquote() << "已切换到配置：" + currentProfileId;
+    updateProfileSummary();
+    qInfo().noquote() << "已切换到配置：" + (profileId.isEmpty() ? "默认" : profileId);
     return true;
 }
 
 void MainWindow::createProfile()
 {
-    if (connectionSession != nullptr && connectionSession->isActive())
-    {
-        QMessageBox::warning(this, "新建失败", "请先断开 VPN 连接，再新建配置。");
-        return;
-    }
-
     bool ok = false;
     const QString name = QInputDialog::getText(
         this,
@@ -768,13 +957,11 @@ void MainWindow::createProfile()
     }
 
     settings = profileService->settings();
-    currentProfileId = profileService->currentProfileId();
     authenticationDialogs->setSettings(settings);
     upgradeSettings();
     updateVersionInfo();
-    resetZjuConnectUi();
-    updateVersionInfo();
-    clearLog();
+
+    addConnectionTab(newProfileId, true);
     refreshProfileMenu();
 
     promptConfigurationGuide(
@@ -785,55 +972,49 @@ void MainWindow::createProfile()
 
 void MainWindow::openConfigurationGuide()
 {
-    if (connectionSession != nullptr && connectionSession->isActive())
-    {
-        QMessageBox::warning(
-            this,
-            "无法修改配置",
-            "请先断开 VPN 连接，再使用配置引导。"
-        );
-        return;
-    }
-
     if (settingWindow != nullptr)
     {
         settingWindow->close();
     }
 
-    const QString oldServerAddress =
-        settings->value("ZJUConnect/ServerAddress").toString();
-    const int oldServerPort =
-        settings->value("ZJUConnect/ServerPort").toInt();
-    const QString oldProtocol =
-        settings->value("ZJUConnect/Protocol").toString();
-    const QString oldAuthType =
-        settings->value("ZJUConnect/AuthType").toString();
-    const QString oldEasyConnectAuthType =
-        settings->value("ZJUConnect/EasyConnectAuthType").toString();
-    const QString oldLoginDomain =
-        settings->value("ZJUConnect/LoginDomain").toString();
-    const QString oldLoginUrl =
-        settings->value("ZJUConnect/LoginURL").toString();
+    const QString profileId = activeTabProfileId();
+    QSettings *profileSettings = settingsForProfile(profileId);
 
-    ConfigurationGuideDialog guide(this, settings);
+    const QString oldServerAddress =
+        profileSettings->value("ZJUConnect/ServerAddress").toString();
+    const int oldServerPort =
+        profileSettings->value("ZJUConnect/ServerPort").toInt();
+    const QString oldProtocol =
+        profileSettings->value("ZJUConnect/Protocol").toString();
+    const QString oldAuthType =
+        profileSettings->value("ZJUConnect/AuthType").toString();
+    const QString oldEasyConnectAuthType =
+        profileSettings->value("ZJUConnect/EasyConnectAuthType").toString();
+    const QString oldLoginDomain =
+        profileSettings->value("ZJUConnect/LoginDomain").toString();
+    const QString oldLoginUrl =
+        profileSettings->value("ZJUConnect/LoginURL").toString();
+
+    ConfigurationGuideDialog guide(this, profileSettings);
     if (guide.exec() != QDialog::Accepted)
     {
         return;
     }
-    guide.applyTo(*settings);
+    guide.applyTo(*profileSettings);
+    profileSettings->sync();
 
     const bool authenticationSettingsChanged =
-        oldServerAddress != settings->value("ZJUConnect/ServerAddress").toString()
-        || oldServerPort != settings->value("ZJUConnect/ServerPort").toInt()
-        || oldProtocol != settings->value("ZJUConnect/Protocol").toString()
-        || oldAuthType != settings->value("ZJUConnect/AuthType").toString()
+        oldServerAddress != profileSettings->value("ZJUConnect/ServerAddress").toString()
+        || oldServerPort != profileSettings->value("ZJUConnect/ServerPort").toInt()
+        || oldProtocol != profileSettings->value("ZJUConnect/Protocol").toString()
+        || oldAuthType != profileSettings->value("ZJUConnect/AuthType").toString()
         || oldEasyConnectAuthType
-            != settings->value("ZJUConnect/EasyConnectAuthType").toString()
-        || oldLoginDomain != settings->value("ZJUConnect/LoginDomain").toString()
-        || oldLoginUrl != settings->value("ZJUConnect/LoginURL").toString();
+            != profileSettings->value("ZJUConnect/EasyConnectAuthType").toString()
+        || oldLoginDomain != profileSettings->value("ZJUConnect/LoginDomain").toString()
+        || oldLoginUrl != profileSettings->value("ZJUConnect/LoginURL").toString();
     if (authenticationSettingsChanged)
     {
-        ApplicationPaths::clearClientData(currentProfileId);
+        ApplicationPaths::clearClientData(profileId);
     }
 
     resetZjuConnectUi();
@@ -877,8 +1058,15 @@ void MainWindow::promptConfigurationGuide(
 
 void MainWindow::renameCurrentProfile()
 {
+    const QString profileId = activeTabProfileId();
+    if (profileId.isEmpty())
+    {
+        QMessageBox::warning(this, "重命名失败", "默认配置不可重命名。");
+        return;
+    }
+
     bool ok = false;
-    QString name = QInputDialog::getText(this, "重命名配置", "请输入新配置名称：\n（仅支持字母、数字、下划线）", QLineEdit::Normal, currentProfileId, &ok);
+    QString name = QInputDialog::getText(this, "重命名配置", "请输入新配置名称：\n（仅支持字母、数字、下划线）", QLineEdit::Normal, profileId, &ok);
     if (!ok)
     {
         return;
@@ -890,13 +1078,13 @@ void MainWindow::renameCurrentProfile()
         QMessageBox::warning(this, "重命名失败", "配置名称不能为空。");
         return;
     }
-    if (normalizedName == currentProfileId)
+    if (normalizedName == profileId)
     {
         return;
     }
-    if (connectionSession != nullptr && connectionSession->isActive())
+
+    if (!profileService->switchTo(profileId))
     {
-        QMessageBox::warning(this, "重命名失败", "请先断开 VPN 连接，再重命名配置。");
         return;
     }
 
@@ -910,26 +1098,33 @@ void MainWindow::renameCurrentProfile()
         return;
     }
 
-    currentProfileId = profileService->currentProfileId();
     settings = profileService->settings();
     authenticationDialogs->setSettings(settings);
     updateVersionInfo();
     refreshProfileMenu();
     clearLog();
-    qInfo().noquote() << "当前配置已重命名为：" + currentProfileId;
+    qInfo().noquote() << "当前配置已重命名为：" + normalizedName;
 }
 
 void MainWindow::deleteCurrentProfile()
 {
-    if (currentProfileId.isEmpty())
+    const QString profileId = activeTabProfileId();
+    if (profileId.isEmpty())
     {
         QMessageBox::warning(this, "删除失败", "默认配置不可删除。");
         return;
     }
 
+    ConnectionSession *session = sessionManager->find(profileId);
+    if (session != nullptr && session->isActive())
+    {
+        QMessageBox::warning(this, "删除失败", "请先断开该配置的 VPN 连接，再删除配置。");
+        return;
+    }
+
     QMessageBox messageBox(this);
     messageBox.setWindowTitle("删除配置");
-    messageBox.setText("确认删除当前配置 \"" + currentProfileId + "\" 吗？");
+    messageBox.setText("确认删除配置 \"" + profileId + "\" 吗？");
     messageBox.addButton(QMessageBox::Yes)->setText("是");
     messageBox.addButton(QMessageBox::No)->setText("否");
     messageBox.setDefaultButton(QMessageBox::No);
@@ -938,23 +1133,42 @@ void MainWindow::deleteCurrentProfile()
         return;
     }
 
-    const QString removedProfileId = currentProfileId;
-    if (connectionSession != nullptr && connectionSession->isActive())
-    {
-        QMessageBox::warning(this, "删除失败", "请先断开 VPN 连接，再删除配置。");
-        return;
-    }
     if (settingWindow != nullptr)
     {
         settingWindow->close();
     }
+
+    if (tabWidgets.contains(profileId))
+    {
+        ui->connectionTabs->removeTab(
+            ui->connectionTabs->indexOf(tabWidgets[profileId].page)
+        );
+        delete tabWidgets[profileId].page;
+        tabWidgets.remove(profileId);
+    }
+    if (tabControllers.contains(profileId))
+    {
+        delete tabControllers[profileId];
+        tabControllers.remove(profileId);
+    }
+    if (profileSettings.contains(profileId))
+    {
+        delete profileSettings[profileId];
+        profileSettings.remove(profileId);
+    }
+
+    if (!profileService->switchTo(profileId))
+    {
+        refreshProfileMenu();
+        return;
+    }
     if (!profileService->removeCurrentAndSwitchToDefault())
     {
         QMessageBox::warning(this, "删除失败", "无法删除该配置文件。");
+        refreshProfileMenu();
         return;
     }
 
-    currentProfileId = profileService->currentProfileId();
     settings = profileService->settings();
     authenticationDialogs->setSettings(settings);
     upgradeSettings();
@@ -962,7 +1176,7 @@ void MainWindow::deleteCurrentProfile()
     resetZjuConnectUi();
     clearLog();
     refreshProfileMenu();
-    qInfo().noquote() << "已删除配置：" + removedProfileId;
+    qInfo().noquote() << "已删除配置：" + profileId;
 }
 
 void MainWindow::upgradeSettings()
@@ -1042,11 +1256,17 @@ void MainWindow::cleanUpWhenQuit()
 
 void MainWindow::gracefullyQuit()
 {
-    if (connectionSession != nullptr && connectionSession->isActive())
+    if (sessionManager->anyActive())
     {
-        connect(connectionSession, &ConnectionSession::finished, qApp,
-                [](ZJU_ERROR) { QApplication::quit(); });
-        ui->pushButton1->click();
+        connect(sessionManager, &ConnectionSessionManager::activeChanged, this,
+            [this](const QString &, bool active)
+            {
+                if (!active && !sessionManager->anyActive())
+                {
+                    QApplication::quit();
+                }
+            });
+        sessionManager->stopAll();
     }
     else
     {
@@ -1058,6 +1278,9 @@ MainWindow::~MainWindow()
 {
     delete coordinator;
     coordinator = nullptr;
+
+    qDeleteAll(profileSettings);
+    profileSettings.clear();
 
     QObject::disconnect(applicationLogger, nullptr, this, nullptr);
     delete ui;

@@ -2,9 +2,11 @@
 #define MAINWINDOWCOORDINATOR_H
 
 #include <QObject>
+#include <QString>
 
 class AuthDialogCoordinator;
 class ConnectionSession;
+class ConnectionSessionManager;
 class ProfileService;
 class SystemProxySession;
 class UpdateChecker;
@@ -22,19 +24,26 @@ public:
     );
 
     ProfileService *profiles() const;
-    ConnectionSession *connection() const;
+    ConnectionSessionManager *sessions() const;
     SystemProxySession *systemProxy() const;
     UpdateChecker *updates() const;
     AuthDialogCoordinator *authenticationDialogs() const;
 
     void prepareForShutdown();
 
+    // Connect a session's authentication signals so that interactive input is
+    // routed back to the correct session.
+    void wireSession(const QString &profileId, ConnectionSession *session);
+
 private:
     ProfileService *profileService;
-    ConnectionSession *connectionSession;
+    ConnectionSessionManager *sessionManager;
     SystemProxySession *systemProxySession;
     UpdateChecker *updateChecker;
     AuthDialogCoordinator *authenticationCoordinator;
+
+    // The profile currently awaiting interactive authentication input.
+    QString activeAuthProfileId;
 };
 
 #endif // MAINWINDOWCOORDINATOR_H

@@ -171,14 +171,13 @@ CoreCommand CoreCommandBuilder::build(const ConnectionProfile &profile, const Co
 
     if (!profile.dns.primary.isEmpty() || profile.dns.automatic)
     {
-        arguments << "-remote-dns-server" << (profile.dns.automatic ? "auto" : profile.dns.primary);
+        arguments << "-zju-dns-server" << (profile.dns.automatic ? "auto" : profile.dns.primary);
     }
     if (profile.dns.ttl != 3600)
     {
         arguments << "-dns-ttl" << QString::number(profile.dns.ttl);
     }
     appendOption(arguments, "-secondary-dns-server", profile.dns.secondary);
-    appendOption(arguments, "-local-dns-server", profile.dns.localDnsServer);
     appendOption(arguments, "-dns-server-bind", profile.dns.dnsServerBind);
 
     if (profile.behavior.disableKeepAlive)
@@ -193,7 +192,7 @@ CoreCommand CoreCommandBuilder::build(const ConnectionProfile &profile, const Co
     }
     if (profile.dns.disableZjuDns)
     {
-        arguments << "-disable-remote-dns";
+        arguments << "-disable-zju-dns";
     }
     if (profile.behavior.disableServerConfig)
     {
@@ -227,8 +226,6 @@ CoreCommand CoreCommandBuilder::build(const ConnectionProfile &profile, const Co
     {
         arguments << "-debug-dump";
     }
-    appendOption(arguments, "-debug-pcap-file", runtimePaths.debugPcapFile);
-    appendOption(arguments, "-debug-tls-log-file", runtimePaths.debugTlsLogFile);
 
     appendOption(arguments, "-socks-bind", profile.proxy.socksBind);
     appendOption(arguments, "-http-bind", profile.proxy.httpBind);

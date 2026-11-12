@@ -218,7 +218,7 @@ void SettingWindow::loadSettings()
         QByteArray::fromBase64(settings->value("Credential/CertPassword").toString().toUtf8())
     );
     ui->credentialsAsArgumentsCheckBox->setChecked(
-        settings->value("ZJUConnect/CredentialsAsArguments", false).toBool()
+        settings->value("ZJUConnect/CredentialsAsArguments", true).toBool()
     );
 
     ProfileManager profileManager;

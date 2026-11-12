@@ -201,10 +201,14 @@ void ZjuConnectProcess::start(const ConnectionProfile &profile)
     CoreRuntimePaths runtimePaths;
 
     // Both protocols can require a graph captcha. The UI chooses the response
-    // format according to the active protocol.
+    // format according to the active protocol. Each ZjuConnectProcess instance
+    // owns its own QTemporaryDir, so graph files are isolated per connection;
+    // the profile id is embedded in the directory name for easier debugging.
     if (tempDir == nullptr)
     {
-        tempDir = new QTemporaryDir;
+        tempDir = new QTemporaryDir(
+            QDir::tempPath() + "/EZ4Connect-" + profile.profileId + "-XXXXXX"
+        );
         tempDir->setAutoRemove(true);
     }
     runtimePaths.graphCodeFile = tempDir->filePath("graph.jpg");

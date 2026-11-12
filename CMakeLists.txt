@@ -42,6 +42,8 @@ set(SOURCE_FILES
     application/commandlineoptions.cpp
     application/coreprocess.h
     application/connectionsession.cpp
+    application/connectionsessionmanager.cpp
+    application/portallocator.cpp
     application/profileservice.cpp
     application/settingsmigrator.cpp
     application/systemproxysession.cpp

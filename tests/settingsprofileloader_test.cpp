@@ -134,7 +134,7 @@ bool usesCompatibleDefaults()
     const ConnectionProfile profile = SettingsProfileLoader::load(settings, "", "", "");
     const bool passed =
         profile.behavior.updateBestNodesInterval == 300
-        && !profile.credentials.passAsArguments
+        && profile.credentials.passAsArguments
         && profile.behavior.disableMultiLine
         && profile.behavior.disableKeepAlive
         && profile.behavior.disableZjuConfig
